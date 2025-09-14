@@ -85,7 +85,7 @@ def main():
     parser.add_argument('--port', type=int, help='Port to bind to (default: from config)')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--config-file', help='Path to configuration file')
-    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                        help='Set logging level')
     args = parser.parse_args()
     
@@ -98,7 +98,7 @@ def main():
     if args.port:
         config.port = args.port
     if args.debug:
-        config.debug = args.debug
+        config.debug = True
     if args.log_level:
         config.log_level = args.log_level
         

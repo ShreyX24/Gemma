@@ -127,12 +127,14 @@ class AutomationOrchestrator:
             from modules.network import NetworkManager
             from modules.screenshot import ScreenshotManager  
             from modules.omniparser_client import OmniparserClient
-            from modules.annotator import Annotator
             from modules.simple_automation import SimpleAutomation
             from modules.game_launcher import GameLauncher
             
             # Create run directory
             run_dir = self._create_run_directory(run, iteration_num)
+
+            # Setup blackbox logging for this run
+            self._setup_blackbox_logging(run_dir, game_config.name, run.run_id, iteration_num)
             
             # Initialize components
             logger.info(f"Connecting to SUT at {device.ip}:{device.port}")
@@ -153,7 +155,6 @@ class AutomationOrchestrator:
                 screen_width=screen_width, 
                 screen_height=screen_height
             )
-            annotator = Annotator()
             game_launcher = GameLauncher(network)
             
             # Create a stop event for this iteration
@@ -167,7 +168,6 @@ class AutomationOrchestrator:
                 vision_model=vision_model,
                 stop_event=stop_event,
                 run_dir=run_dir,
-                annotator=annotator
             )
             
             # Launch game if path is specified
@@ -193,10 +193,8 @@ class AutomationOrchestrator:
                     
                     raise RuntimeError(error_msg)
                 
-                # Wait for game startup
-                startup_wait = 30  # Default startup wait
-                if hasattr(game_config, 'startup_wait'):
-                    startup_wait = game_config.startup_wait
+                # Wait for game startup as specified in YAML
+                startup_wait = game_config.startup_wait
                 
                 logger.info(f"Waiting {startup_wait}s for game initialization...")
                 time.sleep(startup_wait)
@@ -220,10 +218,13 @@ class AutomationOrchestrator:
             try:
                 logger.debug(f"Cleaning up resources for iteration {iteration_num}")
                 
+                # Cleanup blackbox logging
+                self._cleanup_blackbox_logging()
+
                 # Close network connection
                 if 'network' in locals():
                     network.close()
-                    
+
                 # Close vision model/omniparser client
                 if 'vision_model' in locals():
                     try:
@@ -268,10 +269,50 @@ class AutomationOrchestrator:
         
         # Create subdirectories
         (run_dir / "screenshots").mkdir(exist_ok=True)
-        (run_dir / "annotated").mkdir(exist_ok=True)
+        (run_dir / "blackbox").mkdir(exist_ok=True)
         
         return str(run_dir)
-    
+
+    def _setup_blackbox_logging(self, run_dir: str, game_name: str, run_id: str, iteration_num: int):
+        """Setup blackbox logging to capture all console output for this run"""
+        import logging
+        from pathlib import Path
+
+        # Create blackbox log file
+        blackbox_dir = Path(run_dir) / "blackbox"
+        blackbox_file = blackbox_dir / f"console_output_iter{iteration_num}.log"
+
+        # Create a file handler for blackbox logging
+        blackbox_handler = logging.FileHandler(str(blackbox_file), mode='w', encoding='utf-8')
+        blackbox_handler.setLevel(logging.DEBUG)
+
+        # Format for blackbox logging (includes everything)
+        blackbox_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        blackbox_handler.setFormatter(blackbox_formatter)
+
+        # Add handler to root logger to capture all output
+        root_logger = logging.getLogger()
+        root_logger.addHandler(blackbox_handler)
+
+        # Store handler reference for cleanup
+        if not hasattr(self, '_blackbox_handlers'):
+            self._blackbox_handlers = []
+        self._blackbox_handlers.append(blackbox_handler)
+
+        logger.info(f"Blackbox logging initialized: {blackbox_file}")
+        logger.info(f"Game: {game_name}, Run: {run_id}, Iteration: {iteration_num}")
+
+    def _cleanup_blackbox_logging(self):
+        """Clean up blackbox logging handlers"""
+        if hasattr(self, '_blackbox_handlers'):
+            root_logger = logging.getLogger()
+            for handler in self._blackbox_handlers:
+                root_logger.removeHandler(handler)
+                handler.close()
+            self._blackbox_handlers.clear()
+
     def _get_run_directory(self, run: AutomationRun) -> str:
         """Get the base run directory path"""
         return f"logs/{run.game_name.replace(' ', '_')}/run_{run.run_id}"

@@ -5,7 +5,9 @@ Device registry for tracking SUT devices and their states
 
 import logging
 import time
-from dataclasses import dataclass, field
+import json
+import os
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from enum import Enum
@@ -33,7 +35,7 @@ class SUTStatus(Enum):
 
 @dataclass
 class SUTDevice:
-    """SUT device information"""
+    """SUT device information with pairing support"""
     ip: str
     port: int
     unique_id: str
@@ -46,6 +48,12 @@ class SUTDevice:
     error_count: int = 0
     total_pings: int = 0
     successful_pings: int = 0
+
+    # Pairing mode fields
+    is_paired: bool = False
+    paired_at: Optional[datetime] = None
+    paired_by: str = "system"  # Who initiated the pairing
+    pair_priority: int = 1     # Priority for paired device scanning (1=highest)
     
     @property
     def success_rate(self) -> float:
@@ -69,15 +77,130 @@ class SUTDevice:
         """Get seconds since last seen"""
         return int((datetime.now() - self.last_seen).total_seconds())
 
+    # Pairing mode methods
+    def pair_device(self, paired_by: str = "user") -> None:
+        """Pair this device for priority scanning"""
+        self.is_paired = True
+        self.paired_at = datetime.now()
+        self.paired_by = paired_by
+        self.pair_priority = 1  # Set to highest priority
+
+    def unpair_device(self) -> None:
+        """Unpair this device"""
+        self.is_paired = False
+        self.paired_at = None
+        self.paired_by = "system"
+        self.pair_priority = 1
+
+    @property
+    def is_paired_device(self) -> bool:
+        """Check if this device is paired"""
+        return self.is_paired
+
+    @property
+    def pairing_age_seconds(self) -> int:
+        """Get seconds since device was paired"""
+        if not self.is_paired or not self.paired_at:
+            return 0
+        return int((datetime.now() - self.paired_at).total_seconds())
+
+
+class DevicePersistence:
+    """Handles persistence of paired SUT devices to JSON file"""
+
+    def __init__(self, persistence_file: str = "paired_devices.json"):
+        self.persistence_file = persistence_file
+        logger.info(f"DevicePersistence initialized with file: {self.persistence_file}")
+
+    def save_paired_devices(self, devices: Dict[str, SUTDevice]) -> bool:
+        """Save paired devices to JSON file"""
+        try:
+            paired_devices = {
+                device_id: device for device_id, device in devices.items()
+                if device.is_paired
+            }
+
+            if not paired_devices:
+                logger.info("No paired devices to save")
+                return True
+
+            # Convert devices to serializable format
+            serializable_data = {
+                "version": "1.0",
+                "saved_at": datetime.now().isoformat(),
+                "paired_devices": {}
+            }
+
+            for device_id, device in paired_devices.items():
+                device_dict = asdict(device)
+                # Convert datetime objects to ISO strings
+                device_dict['last_seen'] = device.last_seen.isoformat() if device.last_seen else None
+                device_dict['first_discovered'] = device.first_discovered.isoformat() if device.first_discovered else None
+                device_dict['paired_at'] = device.paired_at.isoformat() if device.paired_at else None
+                device_dict['status'] = device.status.value  # Convert enum to string
+
+                serializable_data["paired_devices"][device_id] = device_dict
+
+            with open(self.persistence_file, 'w') as f:
+                json.dump(serializable_data, f, indent=2)
+
+            logger.info(f"Saved {len(paired_devices)} paired devices to {self.persistence_file}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving paired devices: {str(e)}")
+            return False
+
+    def load_paired_devices(self) -> Dict[str, SUTDevice]:
+        """Load paired devices from JSON file"""
+        if not os.path.exists(self.persistence_file):
+            logger.info(f"Paired devices file not found: {self.persistence_file}")
+            return {}
+
+        try:
+            with open(self.persistence_file, 'r') as f:
+                data = json.load(f)
+
+            paired_devices = {}
+            devices_data = data.get("paired_devices", {})
+
+            for device_id, device_dict in devices_data.items():
+                # Convert ISO strings back to datetime objects
+                if device_dict.get('last_seen'):
+                    device_dict['last_seen'] = datetime.fromisoformat(device_dict['last_seen'])
+                if device_dict.get('first_discovered'):
+                    device_dict['first_discovered'] = datetime.fromisoformat(device_dict['first_discovered'])
+                if device_dict.get('paired_at'):
+                    device_dict['paired_at'] = datetime.fromisoformat(device_dict['paired_at'])
+
+                # Convert status string back to enum
+                if 'status' in device_dict:
+                    device_dict['status'] = SUTStatus(device_dict['status'])
+
+                # Create SUTDevice from dict
+                device = SUTDevice(**device_dict)
+                paired_devices[device_id] = device
+
+            logger.info(f"Loaded {len(paired_devices)} paired devices from {self.persistence_file}")
+            return paired_devices
+
+        except Exception as e:
+            logger.error(f"Error loading paired devices: {str(e)}")
+            return {}
+
 
 class DeviceRegistry:
     """Registry for managing SUT devices"""
     
-    def __init__(self, offline_timeout: int = 30):
+    def __init__(self, offline_timeout: int = 30, persistence_file: str = "paired_devices.json"):
         self.devices: Dict[str, SUTDevice] = {}  # Key: unique_id
         self.ip_to_id_mapping: Dict[str, str] = {}  # Key: ip, Value: unique_id
         self.offline_timeout = offline_timeout  # Seconds to consider device offline
         self._lock = None  # Will be set by controller
+
+        # Initialize persistence
+        self.persistence = DevicePersistence(persistence_file)
+        self.load_paired_devices_on_startup()
         
     def register_device(self, ip: str, port: int, unique_id: str, capabilities: List[str] = None, hostname: str = "") -> SUTDevice:
         """Register or update a SUT device"""
@@ -238,10 +361,86 @@ class DeviceRegistry:
         """Get registry statistics"""
         online_count = len(self.get_online_devices())
         total_count = len(self.devices)
-        
+        paired_count = len(self.get_paired_devices())
+
         return {
             "total_devices": total_count,
             "online_devices": online_count,
             "offline_devices": total_count - online_count,
+            "paired_devices": paired_count,
             "discovery_rate": f"{online_count}/{total_count}" if total_count > 0 else "0/0"
         }
+
+    # Pairing mode methods
+    def pair_device(self, unique_id: str, paired_by: str = "user") -> bool:
+        """Pair a device for priority scanning"""
+        device = self.get_device_by_id(unique_id)
+        if not device:
+            logger.warning(f"Cannot pair device {unique_id}: device not found")
+            return False
+
+        device.pair_device(paired_by)
+        logger.info(f"Device {unique_id} ({device.ip}) paired by {paired_by}")
+
+        # Emit pairing event
+        event_bus.emit(EventType.SUT_PAIRED, {
+            "device_id": unique_id,
+            "ip": device.ip,
+            "port": device.port,
+            "hostname": device.hostname,
+            "paired_by": paired_by,
+            "paired_at": device.paired_at.isoformat() if device.paired_at else None
+        })
+
+        # Save paired devices to persistence
+        self.save_paired_devices()
+        return True
+
+    def unpair_device(self, unique_id: str) -> bool:
+        """Unpair a device"""
+        device = self.get_device_by_id(unique_id)
+        if not device:
+            logger.warning(f"Cannot unpair device {unique_id}: device not found")
+            return False
+
+        device.unpair_device()
+        logger.info(f"Device {unique_id} ({device.ip}) unpaired")
+
+        # Emit unpairing event
+        event_bus.emit(EventType.SUT_UNPAIRED, {
+            "device_id": unique_id,
+            "ip": device.ip,
+            "port": device.port,
+            "hostname": device.hostname
+        })
+
+        # Save paired devices to persistence
+        self.save_paired_devices()
+        return True
+
+    def get_paired_devices(self) -> List[SUTDevice]:
+        """Get all paired devices"""
+        return [device for device in self.devices.values() if device.is_paired]
+
+    def get_paired_device_ips(self) -> Set[str]:
+        """Get IPs of all paired devices for priority scanning"""
+        return {device.ip for device in self.devices.values() if device.is_paired}
+
+    # Persistence methods
+    def load_paired_devices_on_startup(self) -> None:
+        """Load paired devices from persistence file on startup"""
+        logger.info("Loading paired devices from persistence...")
+        paired_devices = self.persistence.load_paired_devices()
+
+        for device_id, device in paired_devices.items():
+            # Add to registry but mark as offline initially
+            device.status = SUTStatus.OFFLINE
+            self.devices[device_id] = device
+            self.ip_to_id_mapping[device.ip] = device_id
+            logger.info(f"Loaded paired device: {device.ip} ({device_id})")
+
+        logger.info(f"Loaded {len(paired_devices)} paired devices from persistence")
+
+    def save_paired_devices(self) -> bool:
+        """Save current paired devices to persistence"""
+        return self.persistence.save_paired_devices(self.devices)

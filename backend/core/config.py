@@ -21,6 +21,13 @@ class BackendConfig:
     discovery_interval: float = 2.0  # Fast discovery rate in seconds
     discovery_timeout: float = 3.0   # Timeout for SUT ping
     sut_port: int = 8080
+
+    # Enhanced pairing mode settings
+    paired_devices_scan_interval: float = 0.5  # Fast scan for paired devices
+    unpaired_discovery_interval: float = 5.0   # Slower scan for network discovery
+    enable_priority_scanning: bool = True      # Prioritize paired devices
+    instant_paired_discovery: bool = True      # Connect to paired SUTs immediately on startup
+    paired_devices_file: str = "paired_devices.json"  # Storage for paired devices
     
     # SUT identification
     sut_identifier_key: str = "gemma_sut_signature"
@@ -60,6 +67,13 @@ class ConfigManager:
         config.discovery_interval = float(os.getenv("DISCOVERY_INTERVAL", config.discovery_interval))
         config.discovery_timeout = float(os.getenv("DISCOVERY_TIMEOUT", config.discovery_timeout))
         config.sut_port = int(os.getenv("SUT_PORT", config.sut_port))
+
+        # Pairing mode settings
+        config.paired_devices_scan_interval = float(os.getenv("PAIRED_DEVICES_SCAN_INTERVAL", config.paired_devices_scan_interval))
+        config.unpaired_discovery_interval = float(os.getenv("UNPAIRED_DISCOVERY_INTERVAL", config.unpaired_discovery_interval))
+        config.enable_priority_scanning = os.getenv("ENABLE_PRIORITY_SCANNING", "true").lower() == "true"
+        config.instant_paired_discovery = os.getenv("INSTANT_PAIRED_DISCOVERY", "true").lower() == "true"
+        config.paired_devices_file = os.getenv("PAIRED_DEVICES_FILE", config.paired_devices_file)
         
         config.omniparser_url = os.getenv("OMNIPARSER_URL", config.omniparser_url)
         

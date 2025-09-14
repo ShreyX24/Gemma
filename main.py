@@ -18,7 +18,20 @@ from modules.screenshot import ScreenshotManager
 from modules.gemma_client import GemmaClient
 from modules.qwen_client import QwenClient
 from modules.omniparser_client import OmniparserClient
-from modules.annotator import Annotator
+
+
+def show_progress_bar(current: int, total: int, bar_length: int = 50):
+    """Display a progress bar in the console."""
+    progress = current / total
+    filled_length = int(bar_length * progress)
+    bar = '█' * filled_length + '-' * (bar_length - filled_length)
+    percentage = progress * 100
+
+    # Use \r to overwrite the same line
+    print(f"\rProgress: |{bar}| {percentage:.1f}% Complete ({current}/{total}s)", end='', flush=True)
+
+    if current == total:
+        print()  # New line when complete
 from modules.decision_engine import DecisionEngine
 from modules.game_launcher import GameLauncher
 from modules.config_parser import ConfigParser
@@ -45,13 +58,13 @@ def create_directory_structure(game_name):
     run_dir = f"{game_dir}/run_{timestamp}"
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs(f"{run_dir}/screenshots", exist_ok=True)
-    os.makedirs(f"{run_dir}/annotated", exist_ok=True)
-    
+    os.makedirs(f"{run_dir}/blackbox", exist_ok=True)
+
     return {
         "game_dir": game_dir,
         "run_dir": run_dir,
         "screenshots_dir": f"{run_dir}/screenshots",
-        "annotated_dir": f"{run_dir}/annotated"
+        "blackbox_dir": f"{run_dir}/blackbox"
     }
 
 def parse_arguments():
@@ -218,7 +231,6 @@ def main():
             logger.info("Using Omniparser for UI detection")
             vision_model = OmniparserClient(args.model_url)
         
-        annotator = Annotator()
         decision_engine = DecisionEngine(config_parser.get_config())
         game_launcher = GameLauncher(network)
         
@@ -281,10 +293,6 @@ def main():
                 bounding_boxes = vision_model.detect_ui_elements(screenshot_path)
                 logger.info(f"Detected {len(bounding_boxes)} UI elements")
                 
-                # Annotate screenshot - USE RUN DIRECTORY
-                annotated_path = f"{dirs['annotated_dir']}/annotated_{iteration}.png"
-                annotator.draw_bounding_boxes(screenshot_path, bounding_boxes, annotated_path)
-                logger.info(f"Annotated screenshot saved: {annotated_path}")
                 
                 # Determine next action
                 previous_state = current_state
@@ -314,13 +322,13 @@ def main():
                     if next_action.get("type") == "wait":
                         duration = next_action.get("duration", 1)
                         logger.info(f"Waiting for {duration} seconds...")
-                        
-                        # Simple wait for main.py (no interruption check needed)
-                        for i in range(duration):
-                            time.sleep(1)
-                            if i % 10 == 0 and i > 0:  # Log every 10 seconds for long waits
-                                logger.info(f"Still waiting... {i}/{duration} seconds elapsed")
-                                
+
+                        # Progress bar wait for main.py
+                        for i in range(duration + 1):  # +1 to include final 100%
+                            show_progress_bar(i, duration)
+                            if i < duration:  # Don't sleep on the last iteration
+                                time.sleep(1)
+
                         logger.info(f"Wait completed")
                     else:
                         # Send other action types to SUT

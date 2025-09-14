@@ -41,6 +41,8 @@ class WebSocketHandler:
         event_bus.subscribe(EventType.SUT_ONLINE, self._on_sut_online)
         event_bus.subscribe(EventType.SUT_OFFLINE, self._on_sut_offline)
         event_bus.subscribe(EventType.SUT_STATUS_CHANGED, self._on_sut_status_changed)
+        event_bus.subscribe(EventType.SUT_PAIRED, self._on_sut_paired)
+        event_bus.subscribe(EventType.SUT_UNPAIRED, self._on_sut_unpaired)
         event_bus.subscribe(EventType.AUTOMATION_STARTED, self._on_automation_started)
         event_bus.subscribe(EventType.AUTOMATION_COMPLETED, self._on_automation_completed)
         event_bus.subscribe(EventType.AUTOMATION_FAILED, self._on_automation_failed)
@@ -302,7 +304,54 @@ class WebSocketHandler:
         }
         
         self.socketio.emit('automation_event', automation_data, room='general_updates')
-        
+
+    def _on_sut_paired(self, event: Event):
+        """Handle SUT paired event"""
+        device_id = event.data.get('device_id')
+        device = self.registry.get_device_by_id(device_id)
+
+        if device:
+            pairing_data = {
+                'event': 'device_paired',
+                'device': self._serialize_device_with_pairing(device),
+                'paired_by': event.data.get('paired_by', 'user'),
+                'paired_at': device.paired_at.isoformat() if device.paired_at else None,
+                'timestamp': event.timestamp.isoformat()
+            }
+
+            self.socketio.emit('pairing_event', pairing_data, room='general_updates')
+            self.socketio.emit('device_event', pairing_data, room=f'device_{device_id}')
+            logger.info(f"Sent device paired event for {device_id}")
+
+    def _on_sut_unpaired(self, event: Event):
+        """Handle SUT unpaired event"""
+        device_id = event.data.get('device_id')
+        device = self.registry.get_device_by_id(device_id)
+
+        if device:
+            unpairing_data = {
+                'event': 'device_unpaired',
+                'device': self._serialize_device_with_pairing(device),
+                'timestamp': event.timestamp.isoformat()
+            }
+
+            self.socketio.emit('pairing_event', unpairing_data, room='general_updates')
+            self.socketio.emit('device_event', unpairing_data, room=f'device_{device_id}')
+            logger.info(f"Sent device unpaired event for {device_id}")
+
+    def _serialize_device_with_pairing(self, device: SUTDevice) -> Dict[str, Any]:
+        """Serialize device with pairing-specific fields for JSON transmission"""
+        data = self._serialize_device(device)
+
+        # Add pairing-specific fields
+        data['is_paired'] = device.is_paired
+        data['paired_at'] = device.paired_at.isoformat() if device.paired_at else None
+        data['paired_by'] = device.paired_by
+        data['pair_priority'] = device.pair_priority
+        data['pairing_age_seconds'] = device.pairing_age_seconds
+
+        return data
+
     def broadcast_message(self, event_name: str, data: Dict[str, Any], room: str = 'general_updates'):
         """Broadcast a message to specified room"""
         self.socketio.emit(event_name, data, room=room)

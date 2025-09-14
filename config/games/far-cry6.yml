@@ -2,7 +2,7 @@
 metadata:
   game_name: "Far Cry 6"
   # ORIGINAL: path: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Far Cry 6\\bin\\FarCry6.exe"
-  path: "D:\\SteamLibrary\\steamapps\\common\\Far Cry 6\\bin\\FarCry6.exe"  # TEMP: Updated to D: drive
+  path: "D:\\Games\\steamapps\\common\\Far Cry 6\\bin\\FarCry6.exe"  # TEMP: Updated to D: drive
   process_id: "FarCry® 6"  # Actual process name in Task Manager #click -> ctypes
   version: "1.0"
   benchmark_duration: 280

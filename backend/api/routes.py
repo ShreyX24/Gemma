@@ -612,46 +612,50 @@ class APIRoutes:
                 data = request.get_json()
                 if not data:
                     return jsonify({"error": "Request data required"}), 400
-                
+
                 device_id = data.get('device_id')
-                nickname = data.get('nickname', '')
-                
+                paired_by = data.get('paired_by', 'user')
+
                 if not device_id:
                     return jsonify({"error": "device_id is required"}), 400
-                
+
                 # Verify SUT exists in device registry
                 device = self.device_registry.get_device_by_id(device_id)
                 if not device:
                     return jsonify({"error": f"SUT {device_id} not found"}), 404
-                
-                # Update SUT info in database first
-                if hasattr(self, 'db') and self.db:
-                    self.db.upsert_sut(
-                        device_id=device.unique_id,
-                        ip_address=device.ip,
-                        port=device.port,
-                        hostname=device.hostname,
-                        capabilities=device.capabilities,
-                        status='online' if device.is_online else 'offline'
-                    )
-                    
-                    # Now pair the SUT
-                    success = self.db.pair_sut(device_id, nickname)
-                    if success:
-                        # Broadcast update to WebSocket clients
-                        paired_suts = self.db.get_paired_suts()
-                        self.websocket_handler.broadcast_message('paired_suts_update', paired_suts)
-                        
-                        return jsonify({
-                            "status": "success",
-                            "message": f"SUT {device_id} paired successfully",
-                            "nickname": nickname
+
+                # Pair the SUT using DeviceRegistry
+                success = self.device_registry.pair_device(device_id, paired_by)
+                if success:
+                    # Get updated paired devices for broadcasting
+                    paired_devices = self.device_registry.get_paired_devices()
+                    paired_suts_data = []
+
+                    for device in paired_devices:
+                        paired_suts_data.append({
+                            "device_id": device.unique_id,
+                            "ip": device.ip,
+                            "port": device.port,
+                            "hostname": device.hostname,
+                            "is_online": device.is_online,
+                            "paired_at": device.paired_at.isoformat() if device.paired_at else None,
+                            "paired_by": device.paired_by,
+                            "capabilities": device.capabilities,
+                            "success_rate": device.success_rate
                         })
-                    else:
-                        return jsonify({"error": "Failed to pair SUT"}), 500
+
+                    # Broadcast update to WebSocket clients
+                    self.websocket_handler.broadcast_message('paired_suts_update', paired_suts_data)
+
+                    return jsonify({
+                        "status": "success",
+                        "message": f"SUT {device_id} paired successfully",
+                        "paired_by": paired_by,
+                        "paired_at": device.paired_at.isoformat() if device.paired_at else None
+                    })
                 else:
-                    return jsonify({"error": "Database not available"}), 500
-                
+                    return jsonify({"error": "Failed to pair SUT"}), 500
+
             except Exception as e:
                 logger.error(f"Error pairing SUT: {e}")
                 return jsonify({"error": str(e)}), 500
@@ -660,22 +664,45 @@ class APIRoutes:
         def unpair_sut(device_id):
             """Unpair a SUT device (forget device)"""
             try:
-                if hasattr(self, 'db') and self.db:
-                    success = self.db.unpair_sut(device_id)
-                    if success:
-                        # Broadcast update to WebSocket clients
-                        paired_suts = self.db.get_paired_suts()
-                        self.websocket_handler.broadcast_message('paired_suts_update', paired_suts)
-                        
-                        return jsonify({
-                            "status": "success",
-                            "message": f"SUT {device_id} unpaired successfully"
+                # Verify SUT exists in device registry
+                device = self.device_registry.get_device_by_id(device_id)
+                if not device:
+                    return jsonify({"error": f"SUT {device_id} not found"}), 404
+
+                # Check if device is currently paired
+                if not device.is_paired:
+                    return jsonify({"error": f"SUT {device_id} is not paired"}), 400
+
+                # Unpair the SUT using DeviceRegistry
+                success = self.device_registry.unpair_device(device_id)
+                if success:
+                    # Get updated paired devices for broadcasting
+                    paired_devices = self.device_registry.get_paired_devices()
+                    paired_suts_data = []
+
+                    for device in paired_devices:
+                        paired_suts_data.append({
+                            "device_id": device.unique_id,
+                            "ip": device.ip,
+                            "port": device.port,
+                            "hostname": device.hostname,
+                            "is_online": device.is_online,
+                            "paired_at": device.paired_at.isoformat() if device.paired_at else None,
+                            "paired_by": device.paired_by,
+                            "capabilities": device.capabilities,
+                            "success_rate": device.success_rate
                         })
-                    else:
-                        return jsonify({"error": f"SUT {device_id} not found or not paired"}), 404
+
+                    # Broadcast update to WebSocket clients
+                    self.websocket_handler.broadcast_message('paired_suts_update', paired_suts_data)
+
+                    return jsonify({
+                        "status": "success",
+                        "message": f"SUT {device_id} unpaired successfully"
+                    })
                 else:
-                    return jsonify({"error": "Database not available"}), 500
-                
+                    return jsonify({"error": "Failed to unpair SUT"}), 500
+
             except Exception as e:
                 logger.error(f"Error unpairing SUT {device_id}: {e}")
                 return jsonify({"error": str(e)}), 500
@@ -684,15 +711,157 @@ class APIRoutes:
         def get_paired_suts():
             """Get all paired SUTs"""
             try:
-                if hasattr(self, 'db') and self.db:
-                    paired_suts = self.db.get_paired_suts()
-                    return jsonify({
-                        "paired_suts": paired_suts,
-                        "count": len(paired_suts)
+                # Get paired devices from DeviceRegistry
+                paired_devices = self.device_registry.get_paired_devices()
+                paired_suts_data = []
+
+                for device in paired_devices:
+                    paired_suts_data.append({
+                        "device_id": device.unique_id,
+                        "ip": device.ip,
+                        "port": device.port,
+                        "hostname": device.hostname,
+                        "is_online": device.is_online,
+                        "status": device.status.value,
+                        "paired_at": device.paired_at.isoformat() if device.paired_at else None,
+                        "paired_by": device.paired_by,
+                        "pair_priority": device.pair_priority,
+                        "capabilities": device.capabilities,
+                        "success_rate": device.success_rate,
+                        "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+                        "error_count": device.error_count,
+                        "pairing_age_seconds": device.pairing_age_seconds
                     })
-                else:
-                    return jsonify({"paired_suts": [], "count": 0})
-                
+
+                return jsonify({
+                    "paired_suts": paired_suts_data,
+                    "count": len(paired_suts_data)
+                })
+
             except Exception as e:
                 logger.error(f"Error getting paired SUTs: {e}")
+                return jsonify({"error": str(e)}), 500
+
+        # Discovery Settings Management
+        @app.route('/api/settings/discovery', methods=['GET'])
+        def get_discovery_settings():
+            """Get current discovery settings"""
+            try:
+                discovery_status = self.discovery_service.get_discovery_status()
+
+                settings = {
+                    "discovery_interval": self.discovery_service.config.discovery_interval,
+                    "discovery_timeout": self.discovery_service.config.discovery_timeout,
+                    "paired_devices_scan_interval": self.discovery_service.config.paired_devices_scan_interval,
+                    "unpaired_discovery_interval": self.discovery_service.config.unpaired_discovery_interval,
+                    "enable_priority_scanning": self.discovery_service.config.enable_priority_scanning,
+                    "instant_paired_discovery": self.discovery_service.config.instant_paired_discovery,
+                    "sut_port": self.discovery_service.config.sut_port,
+                    "running": discovery_status.get("running", False),
+                    "target_ips": discovery_status.get("target_ips", 0),
+                    "priority_scan_count": discovery_status.get("priority_scan_count", 0),
+                    "general_scan_count": discovery_status.get("general_scan_count", 0),
+                    "paired_devices_count": discovery_status.get("paired_devices_count", 0)
+                }
+
+                return jsonify({"settings": settings})
+
+            except Exception as e:
+                logger.error(f"Error getting discovery settings: {e}")
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/settings/discovery', methods=['PUT'])
+        def update_discovery_settings():
+            """Update discovery settings"""
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "Request data required"}), 400
+
+                # Update config settings
+                if "discovery_interval" in data:
+                    self.discovery_service.config.discovery_interval = float(data["discovery_interval"])
+
+                if "discovery_timeout" in data:
+                    self.discovery_service.config.discovery_timeout = float(data["discovery_timeout"])
+
+                if "paired_devices_scan_interval" in data:
+                    self.discovery_service.config.paired_devices_scan_interval = float(data["paired_devices_scan_interval"])
+
+                if "unpaired_discovery_interval" in data:
+                    self.discovery_service.config.unpaired_discovery_interval = float(data["unpaired_discovery_interval"])
+
+                if "enable_priority_scanning" in data:
+                    self.discovery_service.config.enable_priority_scanning = bool(data["enable_priority_scanning"])
+
+                if "instant_paired_discovery" in data:
+                    self.discovery_service.config.instant_paired_discovery = bool(data["instant_paired_discovery"])
+
+                if "sut_port" in data:
+                    self.discovery_service.config.sut_port = int(data["sut_port"])
+
+                # Broadcast settings update to WebSocket clients
+                discovery_status = self.discovery_service.get_discovery_status()
+                updated_settings = {
+                    "discovery_interval": self.discovery_service.config.discovery_interval,
+                    "discovery_timeout": self.discovery_service.config.discovery_timeout,
+                    "paired_devices_scan_interval": self.discovery_service.config.paired_devices_scan_interval,
+                    "unpaired_discovery_interval": self.discovery_service.config.unpaired_discovery_interval,
+                    "enable_priority_scanning": self.discovery_service.config.enable_priority_scanning,
+                    "instant_paired_discovery": self.discovery_service.config.instant_paired_discovery,
+                    "sut_port": self.discovery_service.config.sut_port,
+                    "running": discovery_status.get("running", False)
+                }
+
+                self.websocket_handler.broadcast_message('discovery_settings_update', {"settings": updated_settings})
+
+                return jsonify({
+                    "status": "success",
+                    "message": "Discovery settings updated successfully",
+                    "settings": updated_settings
+                })
+
+            except Exception as e:
+                logger.error(f"Error updating discovery settings: {e}")
+                return jsonify({"error": str(e)}), 500
+
+        @app.route('/api/settings/discovery/reset', methods=['POST'])
+        def reset_discovery_settings():
+            """Reset discovery settings to defaults"""
+            try:
+                from ..core.config import BackendConfig
+                default_config = BackendConfig()
+
+                # Reset to default values
+                self.discovery_service.config.discovery_interval = default_config.discovery_interval
+                self.discovery_service.config.discovery_timeout = default_config.discovery_timeout
+                self.discovery_service.config.paired_devices_scan_interval = default_config.paired_devices_scan_interval
+                self.discovery_service.config.unpaired_discovery_interval = default_config.unpaired_discovery_interval
+                self.discovery_service.config.enable_priority_scanning = default_config.enable_priority_scanning
+                self.discovery_service.config.instant_paired_discovery = default_config.instant_paired_discovery
+                self.discovery_service.config.sut_port = default_config.sut_port
+
+                # Broadcast settings update to WebSocket clients
+                discovery_status = self.discovery_service.get_discovery_status()
+                reset_settings = {
+                    "discovery_interval": self.discovery_service.config.discovery_interval,
+                    "discovery_timeout": self.discovery_service.config.discovery_timeout,
+                    "paired_devices_scan_interval": self.discovery_service.config.paired_devices_scan_interval,
+                    "unpaired_discovery_interval": self.discovery_service.config.unpaired_discovery_interval,
+                    "enable_priority_scanning": self.discovery_service.config.enable_priority_scanning,
+                    "instant_paired_discovery": self.discovery_service.config.instant_paired_discovery,
+                    "sut_port": self.discovery_service.config.sut_port,
+                    "running": discovery_status.get("running", False)
+                }
+
+                self.websocket_handler.broadcast_message('discovery_settings_update', {"settings": reset_settings})
+
+                return jsonify({
+                    "status": "success",
+                    "message": "Discovery settings reset to defaults",
+                    "settings": reset_settings
+                })
+
+            except Exception as e:
+                logger.error(f"Error resetting discovery settings: {e}")
                 return jsonify({"error": str(e)}), 500

@@ -19,6 +19,8 @@ class EventType(Enum):
     SUT_ONLINE = "sut_online"
     SUT_OFFLINE = "sut_offline"
     SUT_STATUS_CHANGED = "sut_status_changed"
+    SUT_PAIRED = "sut_paired"
+    SUT_UNPAIRED = "sut_unpaired"
     AUTOMATION_STARTED = "automation_started"
     AUTOMATION_COMPLETED = "automation_completed"
     AUTOMATION_FAILED = "automation_failed"

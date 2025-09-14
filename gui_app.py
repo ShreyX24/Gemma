@@ -15,6 +15,20 @@ import queue
 import yaml
 from pathlib import Path
 
+# Progress bar utility function
+def show_progress_bar_gui(current: int, total: int, bar_length: int = 50):
+    """Display a progress bar in the console for GUI app."""
+    progress = current / total
+    filled_length = int(bar_length * progress)
+    bar = '█' * filled_length + '-' * (bar_length - filled_length)
+    percentage = progress * 100
+
+    # Use \r to overwrite the same line
+    print(f"\rProgress: |{bar}| {percentage:.1f}% Complete ({current}/{total}s)", end='', flush=True)
+
+    if current == total:
+        print()  # New line when complete
+
 # Add logging handler for GUI
 class QueueHandler(logging.Handler):
     """Send logging records to a queue"""
@@ -1102,17 +1116,21 @@ class AutomationGUI:
                         if next_action.get("type") == "wait":
                             duration = next_action.get("duration", 1)
                             self.logger.info(f"Waiting for {duration} seconds...")
-                            
-                            # Wait in small increments so we can check for stop events
-                            for i in range(duration):
+
+                            # Progress bar wait with stop event checking
+                            for i in range(duration + 1):  # +1 to include final 100%
                                 if self.stop_event.is_set():
+                                    print()  # New line before interrupt message
                                     self.logger.info("Wait interrupted by stop event")
                                     break
-                                time.sleep(1)
-                                if i % 10 == 0 and i > 0:  # Log every 10 seconds for long waits
-                                    self.logger.info(f"Still waiting... {i}/{duration} seconds elapsed")
-                                    
-                            self.logger.info(f"Wait completed")
+
+                                show_progress_bar_gui(i, duration)
+
+                                if i < duration:  # Don't sleep on the last iteration
+                                    time.sleep(1)
+
+                            if not self.stop_event.is_set():
+                                self.logger.info(f"Wait completed")
                         else:
                             # Send other action types to SUT
                             network.send_action(next_action)

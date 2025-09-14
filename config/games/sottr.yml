@@ -1,9 +1,9 @@
-# Shadow of the Tomb Raider Benchmark Configuration 
+# Shadow of the Tomb Raider Benchmark Configuration
 metadata:
   game_name: "Shadow of the Tomb Raider"
   # ORIGINAL: path: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe"
-  path: "D:\\SteamLibrary\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe"  # TEMP: Updated to D: drive
-  process_id: "SOTTR"  # Actual process name in Task Manager click -> #ctypes keys -> pydirectinput
+  path: "D:\\Games\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe" # TEMP: Updated to D: drive
+  process_id: "SOTTR" # Actual process name in Task Manager click -> #ctypes keys -> pydirectinput
   version: "1.0"
   benchmark_duration: 120
   startup_wait: 10
@@ -12,7 +12,6 @@ metadata:
 
 # Simple step-by-step workflow
 steps:
-
   1:
     description: "Click Play Button"
     find:
@@ -102,9 +101,9 @@ steps:
       text: "CLOSE"
       text_match: "contains"
     action:
-        type: "key"
-        key: "escape"
-        # methodType: "pydirectinput"
+      type: "key"
+      key: "escape"
+      # methodType: "pydirectinput"
     verify_success:
       - type: "any"
         text: "CLOSE"
@@ -119,9 +118,9 @@ steps:
       text: "CLOSE"
       text_match: "contains"
     action:
-        type: "key"
-        key: "escape"
-        # methodType: "pydirectinput"
+      type: "key"
+      key: "escape"
+      # methodType: "pydirectinput"
     verify_success:
       - type: "any"
         text: "QUIT GAME"

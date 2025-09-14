@@ -97,25 +97,42 @@ class BackendController:
         
         # Background services
         self.monitor_thread: Optional[threading.Thread] = None
-        
+
         logger.info("Backend controller initialized")
         
     def start(self):
-        """Start all backend services"""
+        """Start all backend services with optimized startup sequence"""
         if self.running:
             logger.warning("Backend controller is already running")
             return
-            
-        logger.info("Starting backend controller...")
+
+        logger.info("Starting backend controller with optimized startup sequence...")
         self.running = True
         self._shutdown_event.clear()
-        
-        # Start discovery service
+
+        # Step 1: Test Omniparser connection first (critical for automation)
+        logger.info("Step 1/4: Testing Omniparser connection...")
+        self._test_omniparser_connection()
+
+        # Step 2: WebSocket/Frontend connection (already initialized in __init__)
+        logger.info("Step 2/4: WebSocket handler ready for frontend connections")
+
+        # Step 3: Start SUT Discovery with paired devices prioritized
+        logger.info("Step 3/4: Starting SUT Discovery with paired device priority...")
+        paired_count = len(self.device_registry.get_paired_devices())
+        if paired_count > 0 and self.config.enable_priority_scanning:
+            logger.info(f"Priority scanning enabled: {paired_count} paired devices will be scanned first")
+            if self.config.instant_paired_discovery:
+                logger.info("Instant paired discovery enabled: paired SUTs will be connected immediately")
+        else:
+            logger.info("No paired devices found or priority scanning disabled")
+
         self.discovery_service.start()
-        
-        # Start run manager
+
+        # Step 4: Start remaining services
+        logger.info("Step 4/4: Starting run manager and monitoring...")
         self.run_manager.start()
-        
+
         # Start monitoring thread
         self.monitor_thread = threading.Thread(
             target=self._monitor_loop,
@@ -123,13 +140,11 @@ class BackendController:
             daemon=True
         )
         self.monitor_thread.start()
-        
-        # Test Omniparser connection
-        self._test_omniparser_connection()
-        
+
         logger.info("Backend controller started successfully")
         logger.info(f"WebSocket clients: {self.websocket_handler.get_connected_clients_count()}")
         logger.info(f"Discovery targets: {len(self.discovery_service.target_ips)} IPs")
+        logger.info(f"Paired devices ready for priority scanning: {paired_count}")
         
     def stop(self):
         """Stop all backend services"""
@@ -144,7 +159,7 @@ class BackendController:
             # Stop run manager first (most important)
             if hasattr(self, 'run_manager'):
                 self.run_manager.stop()
-            
+
             # Stop discovery service
             if hasattr(self, 'discovery_service'):
                 self.discovery_service.stop()
@@ -299,18 +314,27 @@ class BackendController:
         
     def _perform_health_checks(self):
         """Perform periodic health checks"""
-        # Check Omniparser status
-        omniparser_status = self.omniparser_client.get_server_status()
-        
-        # Check device registry health
-        device_stats = self.device_registry.get_device_stats()
-        
-        # Check discovery service health
-        discovery_status = self.discovery_service.get_discovery_status()
-        
-        logger.debug(f"Health check - Omniparser: {omniparser_status['status']}, "
-                    f"Devices: {device_stats['online_devices']}/{device_stats['total_devices']}, "
-                    f"Discovery: {discovery_status['running']}")
+        try:
+            # Check Omniparser status
+            omniparser_status = self.omniparser_client.get_server_status()
+            if not omniparser_status:
+                omniparser_status = {"status": "unknown"}
+
+            # Check device registry health
+            device_stats = self.device_registry.get_device_stats()
+            if not device_stats:
+                device_stats = {"online_devices": 0, "total_devices": 0}
+
+            # Check discovery service health
+            discovery_status = self.discovery_service.get_discovery_status()
+            if not discovery_status:
+                discovery_status = {"running": False}
+
+            logger.debug(f"Health check - Omniparser: {omniparser_status.get('status', 'unknown')}, "
+                        f"Devices: {device_stats.get('online_devices', 0)}/{device_stats.get('total_devices', 0)}, "
+                        f"Discovery: {discovery_status.get('running', False)}")
+        except Exception as e:
+            logger.debug(f"Health check error: {e}")
                     
     def _emit_system_status(self):
         """Emit system status to WebSocket clients"""
@@ -334,26 +358,43 @@ class BackendController:
             
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
-        device_stats = self.device_registry.get_device_stats()
-        discovery_status = self.discovery_service.get_discovery_status()
-        omniparser_status = self.omniparser_client.get_server_status()
-        
-        return {
-            "backend": {
-                "running": self.running,
-                "version": "2.0.0",
-                "uptime": time.time(),  # Simplified uptime
-                "websocket_clients": self.websocket_handler.get_connected_clients_count()
-            },
-            "discovery": discovery_status,
-            "devices": device_stats,
-            "omniparser": omniparser_status,
-            "config": {
-                "discovery_interval": self.config.discovery_interval,
-                "discovery_timeout": self.config.discovery_timeout,
-                "sut_port": self.config.sut_port
+        try:
+            device_stats = self.device_registry.get_device_stats()
+            if not device_stats:
+                device_stats = {"total_devices": 0, "online_devices": 0, "offline_devices": 0, "paired_devices": 0, "discovery_rate": "0/0"}
+
+            discovery_status = self.discovery_service.get_discovery_status()
+            if not discovery_status:
+                discovery_status = {"running": False, "target_ips": 0}
+
+            omniparser_status = self.omniparser_client.get_server_status()
+            if not omniparser_status:
+                omniparser_status = {"status": "unknown", "url": self.config.omniparser_url}
+
+            return {
+                "backend": {
+                    "running": self.running,
+                    "version": "2.0.0",
+                    "uptime": time.time(),  # Simplified uptime
+                    "websocket_clients": self.websocket_handler.get_connected_clients_count()
+                },
+                "discovery": discovery_status,
+                "devices": device_stats,
+                "omniparser": omniparser_status,
+                "config": {
+                    "discovery_interval": self.config.discovery_interval,
+                    "discovery_timeout": self.config.discovery_timeout,
+                    "sut_port": self.config.sut_port
+                }
             }
-        }
+        except Exception as e:
+            logger.error(f"Error getting system status: {e}")
+            return {
+                "backend": {"running": self.running, "version": "2.0.0", "error": str(e)},
+                "discovery": {"running": False},
+                "devices": {"total_devices": 0, "online_devices": 0},
+                "omniparser": {"status": "error"}
+            }
         
     def force_discovery_scan(self) -> Dict[str, Any]:
         """Force an immediate discovery scan"""

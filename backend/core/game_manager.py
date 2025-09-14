@@ -25,6 +25,7 @@ class GameConfig:
     resolution: str
     preset: str
     yaml_path: str
+    startup_wait: int = 30  # Startup wait time in seconds
     last_modified: Optional[datetime] = None
 
 
@@ -126,6 +127,7 @@ class GameConfigManager:
                 resolution=metadata.get('resolution', '1920x1080'),
                 preset=metadata.get('preset', 'High'),
                 yaml_path=yaml_file,
+                startup_wait=metadata.get('startup_wait', 30),
                 last_modified=last_modified
             )
             

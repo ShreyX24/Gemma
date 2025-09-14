@@ -2,7 +2,7 @@
 metadata:
   game_name: "HITMAN 3"
   # ORIGINAL: path: "C:\\Program Files\\Epic Games\\HITMAN3\\Retail\\HITMAN3.exe"
-  path: "D:\\SteamLibrary\\steamapps\\common\\HITMAN 3\\Launcher.exe"  # TEMP: Updated to D: drive (assuming moved to Steam)
+  path: "D:\\Games\\steamapps\\common\\HITMAN 3\\Launcher.exe"  # TEMP: Updated to D: drive (assuming moved to Steam)
   process_id: "HITMAN 3"  # Please avoid using PaddleOCR for HITMAN 3
   version: "1.0" #Kindly enable both the SED network and VLAN for testing purposes
   benchmark_duration: 70

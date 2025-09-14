@@ -45,9 +45,19 @@ class SUTDiscoveryService:
         # Network scanning
         self.target_ips: Set[str] = set()
         self._initialize_target_ips()
-        
+
+        # Priority discovery tracking
+        self.priority_scan_count = 0
+        self.general_scan_count = 0
+        self.last_priority_scan = 0
+        self.last_general_scan = 0
+
         logger.info(f"SUTDiscoveryService initialized with {len(self.target_ips)} target IPs")
         logger.info(f"Discovery interval: {config.discovery_interval}s")
+        logger.info(f"Priority scanning: {config.enable_priority_scanning}")
+        if config.enable_priority_scanning:
+            logger.info(f"Paired devices scan interval: {config.paired_devices_scan_interval}s")
+            logger.info(f"Unpaired discovery interval: {config.unpaired_discovery_interval}s")
         
     def _initialize_target_ips(self):
         """Initialize the list of target IPs to scan using dynamic network discovery"""
@@ -113,29 +123,49 @@ class SUTDiscoveryService:
         logger.info("SUT Discovery service stopped")
         
     def _discovery_loop(self):
-        """Main discovery loop"""
-        logger.info("Discovery loop started")
-        
+        """Enhanced discovery loop with priority scanning for paired devices"""
+        logger.info("Discovery loop started with priority scanning support")
+
+        # Perform immediate priority scan for paired devices if enabled
+        if self.config.enable_priority_scanning and self.config.instant_paired_discovery:
+            logger.info("Performing initial priority scan for paired devices...")
+            self._perform_priority_scan()
+
         while self.running and not self._stop_event.is_set():
             try:
-                cycle_start = time.time()
-                
-                # Perform discovery scan
-                self._perform_discovery_scan()
-                
+                current_time = time.time()
+                performed_scan = False
+
+                # Priority scanning for paired devices
+                if (self.config.enable_priority_scanning and
+                    current_time - self.last_priority_scan >= self.config.paired_devices_scan_interval):
+
+                    self._perform_priority_scan()
+                    self.last_priority_scan = current_time
+                    performed_scan = True
+
+                # General network discovery
+                if current_time - self.last_general_scan >= self.config.unpaired_discovery_interval:
+                    self._perform_general_discovery_scan()
+                    self.last_general_scan = current_time
+                    performed_scan = True
+
                 # Cleanup stale devices
-                self.registry.cleanup_stale_devices()
-                
-                cycle_time = time.time() - cycle_start
-                logger.debug(f"Discovery cycle completed in {cycle_time:.2f}s")
-                
-                # Wait for next cycle
-                self._stop_event.wait(self.config.discovery_interval)
-                
+                if performed_scan:
+                    self.registry.cleanup_stale_devices()
+
+                # Wait with intelligent interval based on next required scan
+                next_priority = self.last_priority_scan + self.config.paired_devices_scan_interval
+                next_general = self.last_general_scan + self.config.unpaired_discovery_interval
+                next_scan_time = min(next_priority, next_general)
+                wait_time = max(0.1, next_scan_time - current_time)  # At least 0.1s wait
+
+                self._stop_event.wait(min(wait_time, 1.0))  # Max 1s wait
+
             except Exception as e:
                 logger.error(f"Error in discovery loop: {e}")
                 time.sleep(5)  # Error backoff
-                
+
         logger.info("Discovery loop ended")
         
     def _perform_discovery_scan(self):
@@ -246,6 +276,67 @@ class SUTDiscoveryService:
         
         return device
         
+    def _perform_priority_scan(self):
+        """Perform priority scan for paired devices only"""
+        if not self.config.enable_priority_scanning:
+            return
+
+        paired_ips = self.registry.get_paired_device_ips()
+        if not paired_ips:
+            logger.debug("No paired devices to scan")
+            return
+
+        logger.debug(f"Starting priority scan for {len(paired_ips)} paired devices")
+        with self._discovery_lock:
+            online_count = 0
+
+            # Use ThreadPoolExecutor for concurrent scanning
+            with ThreadPoolExecutor(max_workers=10) as executor:  # More workers for faster paired scanning
+                future_to_ip = {
+                    executor.submit(self._scan_ip, ip): ip
+                    for ip in paired_ips
+                }
+
+                # Process results as they complete
+                for future in as_completed(future_to_ip):
+                    ip = future_to_ip[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            online_count += 1
+                    except Exception as e:
+                        logger.debug(f"Error scanning paired device {ip}: {e}")
+
+            self.priority_scan_count += 1
+            logger.debug(f"Priority scan complete: {online_count}/{len(paired_ips)} paired SUTs online")
+
+    def _perform_general_discovery_scan(self):
+        """Perform general network discovery scan for all IPs"""
+        logger.debug(f"Starting general discovery scan for {len(self.target_ips)} IPs")
+        with self._discovery_lock:
+            online_count = 0
+
+            # Use ThreadPoolExecutor for concurrent scanning
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Submit all scan tasks
+                future_to_ip = {
+                    executor.submit(self._scan_ip, ip): ip
+                    for ip in self.target_ips
+                }
+
+                # Process results as they complete
+                for future in as_completed(future_to_ip):
+                    ip = future_to_ip[future]
+                    try:
+                        result = future.result()
+                        if result:
+                            online_count += 1
+                    except Exception as e:
+                        logger.debug(f"Error scanning {ip}: {e}")
+
+            self.general_scan_count += 1
+            logger.debug(f"General discovery scan complete: {online_count} SUTs found")
+
     def force_discovery_scan(self) -> Dict[str, Any]:
         """Force an immediate discovery scan"""
         logger.info("Forcing discovery scan")
@@ -277,10 +368,20 @@ class SUTDiscoveryService:
             logger.info(f"Removed target IP: {ip}")
             
     def get_discovery_status(self) -> Dict[str, Any]:
-        """Get discovery service status"""
-        return {
+        """Get discovery service status with priority scanning info"""
+        paired_devices_count = len(self.registry.get_paired_devices()) if hasattr(self.registry, 'get_paired_devices') else 0
+
+        status = {
             "running": self.running,
             "target_ips": len(self.target_ips),
+            "priority_scanning_enabled": self.config.enable_priority_scanning,
+            "paired_devices_count": paired_devices_count,
+            "priority_scan_count": self.priority_scan_count,
+            "general_scan_count": self.general_scan_count,
+            "discovery_intervals": {
+                "paired_devices": self.config.paired_devices_scan_interval,
+                "unpaired_discovery": self.config.unpaired_discovery_interval
+            },
             "discovery_interval": self.config.discovery_interval,
             "discovery_timeout": self.config.discovery_timeout,
             **self.registry.get_device_stats()

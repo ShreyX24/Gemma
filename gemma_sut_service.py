@@ -22,6 +22,7 @@ from pynput.mouse import Button, Listener as MouseListener
 from pynput.keyboard import Key, Listener as KeyboardListener
 import ctypes
 from ctypes import wintypes
+import pydirectinput
 
 # Configure logging
 logging.basicConfig(
@@ -356,6 +357,7 @@ def handle_click_action(data):
     x = data.get('x', 0)
     y = data.get('y', 0)
     button = data.get('button', 'left').lower()
+    click_type = data.get('clickType', 'pynput').lower()
     move_duration = data.get('move_duration', 0.3)
     click_delay = data.get('click_delay', 0.1)
     
@@ -377,18 +379,48 @@ def handle_click_action(data):
         if click_delay > 0:
             time.sleep(click_delay)
         
-        # Perform click
+        # Perform click based on clickType
         button_map = {
             'left': Button.left,
             'right': Button.right,
             'middle': Button.middle
         }
+
+        if click_type == "win32":
+            win32api.SetCursorPos((x, y))
+            if button == 'left':
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, x, y, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, x, y, 0, 0)
+            elif button == 'right':
+                win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, x, y, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, x, y, 0, 0)
+            elif button == 'middle':
+                win32api.mouse_event(win32con.MOUSEEVENTF_MIDDLEDOWN, x, y, 0, 0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_MIDDLEUP, x, y, 0, 0)
+        elif click_type == "pyautogui":
+            pyautogui.click(x=x, y=y, button=button)
+        elif click_type == "pynput":
+            mouse_controller.position = (x, y)
+            mouse_controller.click(button_map[button])
+        elif click_type == "ctypes":
+            # Convert to absolute coordinates and click
+            screenWidth = ctypes.windll.user32.GetSystemMetrics(0)
+            screenHeight = ctypes.windll.user32.GetSystemMetrics(1)
+            absX = int(x * 65535 / screenWidth)
+            absY = int(y * 65535 / screenHeight)
+            ctypes.windll.user32.mouse_event(0x0001 | 0x8000, absX, absY, 0, 0)
+            ctypes.windll.user32.mouse_event(0x0002, 0, 0, 0, 0)
+            time.sleep(0.1)
+            ctypes.windll.user32.mouse_event(0x0004, 0, 0, 0, 0)
+        else:
+            # Default fallback to pynput
+            mouse_controller.position = (x, y)
+            mouse_controller.click(button_map[button])
         
-        mouse_controller.click(button_map[button])
-        
-        logger.info(f"{button.capitalize()}-clicked at ({x}, {y})")
+        logger.info(f"{button.capitalize()}-clicked at ({x}, {y}) using {click_type}")
         return jsonify({
-            "status": "success", 
+            "status": "success",
+            "clickType": click_type,
             "action": f"{button}_click", 
             "coordinates": [x, y],
             "move_duration": move_duration,
@@ -516,13 +548,14 @@ def handle_scroll_action(data):
 def handle_key_action(data):
     """Handle single key press actions."""
     key_name = data.get('key', '')
+    method_type = data.get('methodType', 'pyautogui')
     
     if not key_name:
         return jsonify({"status": "error", "error": "No key specified"}), 400
     
     try:
-        # Map common key names to pynput keys
-        key_mapping = {
+        # Map common key names for different input methods
+        pynput_key_mapping = {
             'enter': Key.enter,
             'return': Key.enter,
             'space': Key.space,
@@ -541,19 +574,58 @@ def handle_key_action(data):
             'up': Key.up, 'down': Key.down, 'left': Key.left, 'right': Key.right,
             'home': Key.home, 'end': Key.end, 'pageup': Key.page_up, 'pagedown': Key.page_down
         }
+
+        # PyAutoGUI key mapping (string-based)
+        pyautogui_key_mapping = {
+            'enter': 'enter',
+            'return': 'enter',
+            'space': 'space',
+            'tab': 'tab',
+            'escape': 'esc',
+            'esc': 'esc',
+            'delete': 'delete',
+            'backspace': 'backspace',
+            'shift': 'shift',
+            'ctrl': 'ctrl',
+            'alt': 'alt',
+            'win': 'winleft',
+            'f1': 'f1', 'f2': 'f2', 'f3': 'f3', 'f4': 'f4',
+            'f5': 'f5', 'f6': 'f6', 'f7': 'f7', 'f8': 'f8',
+            'f9': 'f9', 'f10': 'f10', 'f11': 'f11', 'f12': 'f12',
+            'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right',
+            'home': 'home', 'end': 'end', 'pageup': 'pageup', 'pagedown': 'pagedown'
+        }
+
+        used_method = "pyautogui"  # Default to pyautogui
+
+        # Execute key press based on methodType
+        if method_type == "pydirectinput":
+            # Use original key name for pydirectinput
+            pydirectinput.press(key_name)
+            used_method = "pydirectinput"
+        elif method_type == "pynput":
+            # Use pynput Key objects
+            key_to_press = pynput_key_mapping.get(key_name.lower(), key_name)
+            keyboard_controller.press(key_to_press)
+            keyboard_controller.release(key_to_press)
+            used_method = "pynput"
+        elif method_type == "pyautogui":
+            # Use string key names for pyautogui
+            key_to_press = pyautogui_key_mapping.get(key_name.lower(), key_name.lower())
+            pyautogui.press(key_to_press)
+            used_method = "pyautogui"
+        else:
+            # Default fallback to pyautogui (was pynput, but pyautogui is more reliable)
+            key_to_press = pyautogui_key_mapping.get(key_name.lower(), key_name.lower())
+            pyautogui.press(key_to_press)
+            used_method = "pyautogui"
         
-        # Get the key to press
-        key_to_press = key_mapping.get(key_name.lower(), key_name)
-        
-        # Press and release the key
-        keyboard_controller.press(key_to_press)
-        keyboard_controller.release(key_to_press)
-        
-        logger.info(f"Pressed key: {key_name}")
+        logger.info(f"Pressed key: {key_name} using {used_method}")
         return jsonify({
             "status": "success", 
             "action": "keypress", 
-            "key": key_name
+            "key": key_name,
+            "used_method": used_method
         })
         
     except Exception as e:
@@ -612,6 +684,7 @@ def handle_text_action(data):
     text = data.get('text', '')
     clear_first = data.get('clear_first', False)
     char_delay = data.get('char_delay', 0.05)
+    method_type = data.get('methodType', 'pyautogui')
     
     if not text:
         return jsonify({"status": "error", "error": "No text specified"}), 400
@@ -619,32 +692,55 @@ def handle_text_action(data):
     try:
         # Clear existing text if requested
         if clear_first:
-            keyboard_controller.press(Key.ctrl)
-            keyboard_controller.press('a')
-            keyboard_controller.release('a')
-            keyboard_controller.release(Key.ctrl)
-            time.sleep(0.1)
+            if method_type == "pydirectinput":
+                pydirectinput.hotkey('ctrl', 'a')
+                pydirectinput.press('backspace')
+            elif method_type == "pyautogui":
+                pyautogui.hotkey('ctrl', 'a')
+                pyautogui.press('backspace')
+            elif method_type == "pynput":
+                keyboard_controller.press(Key.ctrl)
+                keyboard_controller.press('a')
+                keyboard_controller.release('a')
+                keyboard_controller.release(Key.ctrl)
+                time.sleep(0.1)
         
         # Type text character by character
         for char in text:
             if char == '\n':
-                keyboard_controller.press(Key.enter)
-                keyboard_controller.release(Key.enter)
+                if method_type == "pydirectinput":
+                    pydirectinput.press('enter')
+                elif method_type == "pyautogui":
+                    pyautogui.press('enter')
+                elif method_type == "pynput":
+                    keyboard_controller.press(Key.enter)
+                    keyboard_controller.release(Key.enter)
             elif char == '\t':
-                keyboard_controller.press(Key.tab)
-                keyboard_controller.release(Key.tab)
+                if method_type == "pydirectinput":
+                    pydirectinput.press('tab')
+                elif method_type == "pyautogui":
+                    pyautogui.press('tab')
+                elif method_type == "pynput":
+                    keyboard_controller.press(Key.tab)
+                    keyboard_controller.release(Key.tab)
             else:
-                keyboard_controller.type(char)
+                if method_type == "pydirectinput":
+                    pydirectinput.typewrite(char)
+                elif method_type == "pyautogui":
+                    pyautogui.typewrite(char)
+                elif method_type == "pynput":
+                    keyboard_controller.type(char)
             
             if char_delay > 0:
                 time.sleep(char_delay)
         
-        logger.info(f"Typed text: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+        logger.info(f"Typed text: '{text[:50]}{'...' if len(text) > 50 else ''}' using method {method_type}")
         return jsonify({
             "status": "success", 
             "action": "text_input", 
             "text_length": len(text),
-            "clear_first": clear_first
+            "clear_first": clear_first,
+            "used_method": method_type
         })
         
     except Exception as e:
