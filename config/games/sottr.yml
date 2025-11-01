@@ -2,7 +2,7 @@
 metadata:
   game_name: "Shadow of the Tomb Raider"
   # ORIGINAL: path: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe"
-  path: "D:\\Games\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe" # TEMP: Updated to D: drive
+  path: "D:\\SteamLibrary\\steamapps\\common\\Shadow of the Tomb Raider\\SOTTR.exe" # TEMP: Updated to D: drive
   process_id: "SOTTR" # Actual process name in Task Manager click -> #ctypes keys -> pydirectinput
   version: "1.0"
   benchmark_duration: 120
@@ -77,13 +77,14 @@ steps:
     action:
       type: "click"
       button: "left"
+      clickType: "ctypes"
       move_duration: 1.5
-      click_delay: 1.5
+      click_delay: 2
     verify_success:
       - type: "any"
         text: "FPS"
         text_match: "contains"
-    expected_delay: 5
+    expected_delay: 10
     timeout: 20
 
   5:
