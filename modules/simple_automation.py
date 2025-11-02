@@ -255,8 +255,7 @@ class SimpleAutomation:
     def _handle_click_action(self, action_config: Dict[str, Any], target_element: Optional[BoundingBox]) -> bool:
         """Handle various click actions with enhanced logging."""
         button = action_config.get("button", "left").lower()
-        click_type = action_config.get("clickType", "pynput").lower()
-        
+
         # Get element information for logging
         element_info = "unknown element"
         if target_element:
@@ -277,21 +276,20 @@ class SimpleAutomation:
         # Movement and timing parameters
         move_duration = action_config.get("move_duration", 0.5)
         click_delay = action_config.get("click_delay", 0.1)
-        
+
         action = {
             "type": "click",
             "x": x,
             "y": y,
             "button": button,
-            "clickType": click_type,
             "move_duration": move_duration,
             "click_delay": click_delay
         }
-        
+
         try:
             response = self.network.send_action(action)
             # Enhanced logging with element information
-            logger.info(f"Clicked on {element_info} at ({x}, {y}) using {click_type}")
+            logger.info(f"Clicked on {element_info} at ({x}, {y})")
             if target_element and target_element.element_text:
                 logger.debug(f"Element details: type='{target_element.element_type}', text='{target_element.element_text}', size={target_element.width}x{target_element.height}")
             return True
@@ -346,11 +344,10 @@ class SimpleAutomation:
             }
             
             mapped_key = key_mapping.get(key.lower(), key)
-            method_key = action_config.get("methodType", "pyautogui")
-            
+
             try:
-                response = self.network.send_action({"type": "key", "key": mapped_key, "methodType": method_key})
-                logger.info(f"Pressed key: {mapped_key} using methodType: {method_key}")
+                response = self.network.send_action({"type": "key", "key": mapped_key})
+                logger.info(f"Pressed key: {mapped_key}")
                 return True
             except Exception as e:
                 logger.error(f"Failed to send key action: {str(e)}")
@@ -365,37 +362,36 @@ class SimpleAutomation:
         
         # Clear existing text if specified
         clear_first = action_config.get("clear_first", False)
-        method_key = action_config.get("methodType", "pyautogui")
-        
+
         if clear_first:
             try:
                 # Ctrl+A to select all, then type
-                self.network.send_action({"type": "hotkey", "keys": ["ctrl", "a"], "methodType": method_key})
+                self.network.send_action({"type": "hotkey", "keys": ["ctrl", "a"]})
                 time.sleep(0.1)
             except Exception as e:
                 logger.warning(f"Failed to clear existing text: {str(e)}")
-        
+
         # Type character by character with optional delay
         char_delay = action_config.get("char_delay", 0.05)
-        
+
         try:
             for char in text:
                 if self.stop_event and self.stop_event.is_set():
                     break
-                    
+
                 if char == ' ':
-                    self.network.send_action({"type": "key", "key": "space", "methodType": method_key})
+                    self.network.send_action({"type": "key", "key": "space"})
                 elif char == '\n':
-                    self.network.send_action({"type": "key", "key": "Return", "methodType": method_key})
+                    self.network.send_action({"type": "key", "key": "Return"})
                 elif char == '\t':
-                    self.network.send_action({"type": "key", "key": "Tab", "methodType": method_key})
+                    self.network.send_action({"type": "key", "key": "Tab"})
                 else:
-                    self.network.send_action({"type": "key", "key": char, "methodType": method_key})
-                
+                    self.network.send_action({"type": "key", "key": char})
+
                 if char_delay > 0:
                     time.sleep(char_delay)
-            
-            logger.info(f"Typed text: '{text[:50]}{'...' if len(text) > 50 else ''}' using method {method_key}")
+
+            logger.info(f"Typed text: '{text[:50]}{'...' if len(text) > 50 else ''}'")
             return True
             
         except Exception as e:

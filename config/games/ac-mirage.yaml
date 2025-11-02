@@ -21,13 +21,11 @@ steps:
       text: Press any key
       text_match: contains
     action:
-      type: click
-      button: left
-      move_duration: 0.3
-      click_delay: 0.2
+      type: key
+      key: space
     optional: true
-    expected_delay: 10
-    timeout: 20
+    expected_delay: 12
+    timeout: 25
   2:
     description: Click benchmark
     find:
@@ -38,23 +36,23 @@ steps:
       type: click
       button: left
       move_duration: 0.3
-      click_delay: 0.2
-    expected_delay: 2
-    timeout: 20
+      click_delay: 0.5
+    expected_delay: 3
+    timeout: 25
   3:
     description: confirm step to start benchmark - KB HIT SPACE BAR
     action:
       type: key
       key: space
-    expected_delay: 2
-    timeout: 20
+    expected_delay: 3
+    timeout: 25
   4:
     description: WAIT FOR BENCHMARK TO COMPLETE
     action:
       type: wait
-      duration: 150
-    expected_delay: 2
-    timeout: 20
+      duration: 110
+    expected_delay: 3
+    timeout: 25
   5:
     description: CLOSE ON RESULT PAGE
     find:
@@ -65,9 +63,9 @@ steps:
       type: click
       button: left
       move_duration: 0.5
-      click_delay: 0.2
-    expected_delay: 20
-    timeout: 20
+      click_delay: 0.5
+    expected_delay: 18
+    timeout: 30
   6:
     description: PRESS ANY KEY ON START SCREEN
     find:
@@ -75,12 +73,10 @@ steps:
       text: Press any key
       text_match: contains
     action:
-      type: click
-      button: left
-      move_duration: 0.3
-      click_delay: 0.2
-    expected_delay: 5
-    timeout: 20
+      type: key
+      key: space
+    expected_delay: 6
+    timeout: 25
   7:
     description: CLICK QUIT TO DESKTOP
     find:
@@ -91,16 +87,16 @@ steps:
       type: click
       button: left
       move_duration: 0.5
-      click_delay: 0.2
-    expected_delay: 2
-    timeout: 20
+      click_delay: 0.5
+    expected_delay: 3
+    timeout: 25
   8:
     description: CONFIRM QUIT TO DESKTOP
     action:
       type: key
       key: space
-    expected_delay: 2
-    timeout: 20
+    expected_delay: 3
+    timeout: 25
 fallbacks:
   general:
     action: key
